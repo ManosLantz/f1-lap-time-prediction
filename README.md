@@ -54,12 +54,19 @@ RMSE ≈ 0.65 s
 These values may change as additional features or models are added.
 
 Project Structure
+
 config.py            # Configuration and race info
+
 f1_data.py           # Dataset creation and FastF1 processing
+
 features.py          # Feature engineering
+
 train_model.py       # Training, evaluation, baselines
+
 tune_xgb_direct.py   # Direct hyperparameter tuning
+
 tune_xgboost.py      # Alternative tuning approach (for comparison)
+
 utils.py             # Helper functions
 
 
