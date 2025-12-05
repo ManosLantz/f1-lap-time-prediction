@@ -1,0 +1,22 @@
+# Python cache
+__pycache__/
+*.pyc
+
+# Virtual environments
+venv/
+.env/
+.venv/
+
+# FastF1 / project cache
+f1_cache/
+data/raw/
+*.ff1pkl
+*.ff1p
+*.sqlite
+
+# Generated data (optional, if you don't want to track datasets)
+data/*.csv
+
+# IDE settings
+.vscode/
+.idea/
