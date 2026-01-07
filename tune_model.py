@@ -1,39 +1,45 @@
 import pandas as pd
-import numpy as np
 import xgboost as xgb
+import numpy as np
+from sklearn.model_selection import RandomizedSearchCV, GroupKFold
 from sklearn.metrics import mean_absolute_error
-import random
-from train_model import DATA_PATH, FEATURES
+
+#Paths
+DATA_PATH = "data/f1_lap_dataset.csv"
 
 # === CONFIGURATION ===
-N_ITER = 15
-TUNING_RACES = [
-    "Bahrain Grand Prix", "Saudi Arabian Grand Prix", 
-    "Spanish Grand Prix", "Italian Grand Prix"
-]
+N_ITER = 120  # Good balance of speed/quality
+N_FOLDS = 5 
 
+# Expanded Search Space for Clean Data
 PARAM_DIST = {
-    'learning_rate': [0.03, 0.05, 0.1],
-    'max_depth': [3, 4, 5, 6],
-    'n_estimators': [300, 500],
-    'subsample': [0.6, 0.7, 0.8],
-    'colsample_bytree': [0.6, 0.7, 0.8],
+    # Since data is cleaner, we might tolerate slightly higher learning rates
+    'learning_rate': [0.005, 0.01, 0.02, 0.05, 0.1],
+    'n_estimators': [300, 500, 700, 1000],
+    'max_depth': [3, 4, 5, 6, 7, 8],
+    'subsample': [0.6, 0.7, 0.8, 0.9],
+    'colsample_bytree': [0.6, 0.7, 0.8, 0.9],
     'min_child_weight': [1, 3, 5],
-    'reg_lambda': [1.0, 5.0, 10.0]
+    'reg_lambda': [1.0, 5.0, 10.0],
+    'reg_alpha': [0, 0.1, 0.5, 1.0]
 }
 
-def load_data_strict():
-    print("Loading full history for tuning...")
+FEATURES = [
+    'LapNumber', 'TyreAge', 'FuelLapsRemaining', 
+    'AirTemp', 'TrackTemp', 'Humid', 'Rainfall', 
+    'CarPaceIndex', 'LapsSinceRestart'
+]
+
+def load_tuning_data_clean():
+    print("Loading history (2022-2024) for tuning...")
     df = pd.read_csv(DATA_PATH, low_memory=False)
     
-    # 1. Keep ALL SEASONS for the Tuning Races
-    # (Fixes the "Unseen Track" issue: Model can learn Italy pace from 2022-2024)
-    df = df[df['RaceName'].isin(TUNING_RACES)]
-    
+    # 1. Filter Years
+    df = df[df['Season'].isin([2022, 2023, 2024])].copy()
     if 'Compound' in df.columns:
         df = df[df['Compound'].isin(['SOFT','MEDIUM','HARD'])]
 
-    # 2. Generate Missing Features
+    # 2. Feature Gen
     if 'FuelLapsRemaining' not in df.columns:
         max_laps = df.groupby('RaceName')['LapNumber'].transform('max')
         df['FuelLapsRemaining'] = max_laps - df['LapNumber']
@@ -43,106 +49,78 @@ def load_data_strict():
         df['CarPaceIndex'] = df['LapTimeSec'] / race_medians
         
     if 'LapsSinceRestart' not in df.columns:
-        df['LapsSinceRestart'] = df['LapNumber'] 
+        df['LapsSinceRestart'] = df['LapNumber']
 
-    # 3. Triple Filter (Prev/Curr/Next must be Fast)
-    median_pace = df.groupby('RaceName')['LapTimeSec'].transform('median')
-    threshold = median_pace * 1.07
-    
     if 'PrevLapTimeSec' not in df.columns:
         df['PrevLapTimeSec'] = df.groupby('Driver')['LapTimeSec'].shift(1)
-        
-    # Calculate Delta Target (The ChatGPT Fix)
+
+    # 3. APPLY THE "JAPAN FIX" FILTER (Strict Cleaning)
+    print("   Applying Dynamic Race Status Filter (Removing VSC/Slow Laps)...")
+    
+    # A. Calculate Global Benchmark per race (Top 25% pace)
+    race_benchmarks = df.groupby(['Season', 'RaceName'])['LapTimeSec'].quantile(0.25)
+    df = df.merge(race_benchmarks.rename('RaceBenchmark'), on=['Season', 'RaceName'], how='left')
+    
+    # B. Identify Slow Laps (> 105% of benchmark)
+    df['IsSlowLap'] = df['LapTimeSec'] > (df['RaceBenchmark'] * 1.05)
+    
+    # C. Shift to find broken chains
+    df = df.sort_values(['Season', 'RaceName', 'Driver', 'LapNumber'])
+    df['PrevIsSlow'] = df.groupby(['Season', 'RaceName', 'Driver'])['IsSlowLap'].shift(1).fillna(True)
+    df['NextIsSlow'] = df.groupby(['Season', 'RaceName', 'Driver'])['IsSlowLap'].shift(-1).fillna(True)
+    
+    # D. Keep only Pure Chains (Fast -> Fast -> Fast)
+    clean_mask = (~df['IsSlowLap']) & (~df['PrevIsSlow']) & (~df['NextIsSlow'])
+    df = df[clean_mask].copy()
+    
+    # 4. Create Target (Delta)
     df['DeltaNextLapSec'] = df['NextLapTimeSec'] - df['PrevLapTimeSec']
     
-    mask_prev = df['PrevLapTimeSec'] < threshold
-    mask_curr = df['LapTimeSec'] < threshold
+    # 5. Backup RaceName for Grouping
+    race_name_backup = df['RaceName'].copy() 
     
-    if 'NextLapTimeSec' in df.columns:
-        mask_next = df['NextLapTimeSec'] < threshold
-        final_mask = mask_prev & mask_curr & mask_next
-    else:
-        final_mask = mask_prev & mask_curr
-
-    df = df[final_mask].copy()
-    
-    # 4. Encoding (With RaceName!)
-    # We include RaceName dummies so model knows "This is Monza"
+    # 6. Encode
     df = pd.get_dummies(df, columns=['Driver', 'Compound', 'RaceName'], dummy_na=False)
-    
-    # 5. Feature Alignment
+    df['RaceName'] = race_name_backup 
+
+    # 7. Final Features
     available_feats = [f for f in FEATURES if f in df.columns]
     dummy_cols = [c for c in df.columns if c.startswith('Driver_') or c.startswith('Compound_') or c.startswith('RaceName_')]
     final_feats = list(set(available_feats + dummy_cols))
-    
-    # Ensure PrevLapTimeSec is in features
-    if 'PrevLapTimeSec' not in final_feats:
-         final_feats.append('PrevLapTimeSec')
+    if 'PrevLapTimeSec' not in final_feats: final_feats.append('PrevLapTimeSec')
 
-    print(f"Data Loaded: {len(df)} laps across multiple seasons.")
+    print(f"Tuning Data: {len(df)} clean laps. (Seasons: {df['Season'].unique()})")
     return df, final_feats
 
 def run_tuning():
-    df, features = load_data_strict()
+    df, features = load_tuning_data_clean()
     
-    if df.empty:
-        print("Error: No data.")
-        return
-
-    best_mae = float('inf')
-    best_params = {}
+    X = df[features]
+    y = df['DeltaNextLapSec']
+    groups = df['RaceName']  # Group by Race to prevent leakage
     
-    print(f"\nStarting Delta-Based Search...")
+    model = xgb.XGBRegressor(objective='reg:absoluteerror', n_jobs=-1, random_state=42)
     
-    for i in range(1, N_ITER + 1):
-        params = {k: random.choice(v) for k, v in PARAM_DIST.items()}
-        params['n_jobs'] = -1
-        
-        mae_scores = []
-        
-        # LORO on 2025 races only (Training on 2022-2024 + others)
-        for race in TUNING_RACES:
-            # Test: 2025 version of this race
-            test_mask = (df['RaceName_' + race] == 1) & (df['Season'] == 2025)
-            
-            # If the dummy column approach fails (rare), fallback to string matching if RaceName column preserved
-            # But get_dummies usually drops it. We trust the dummy column exists.
-            if f'RaceName_{race}' not in df.columns: continue
-            
-            # Train: Everything else (including 2022-24 of this race!)
-            train_df = df[~test_mask]
-            test_df = df[test_mask]
-            
-            if len(test_df) < 10: continue
-            
-            # Align cols
-            train_cols = [c for c in train_df.columns if c in features]
-            
-            model = xgb.XGBRegressor(**params)
-            
-            # === THE CHATGPT FIX: TRAIN ON DELTA ===
-            model.fit(train_df[train_cols], train_df['DeltaNextLapSec'])
-            delta_preds = model.predict(test_df[train_cols])
-            
-            # Reconstruct Absolute Time for MAE
-            abs_preds = test_df['PrevLapTimeSec'] + delta_preds
-            
-            mae = mean_absolute_error(test_df['NextLapTimeSec'], abs_preds)
-            mae_scores.append(mae)
-        
-        if not mae_scores: continue
-        avg_mae = np.mean(mae_scores)
-        
-        print(f"Iter {i:02d} | MAE: {avg_mae:.4f}s | LR: {params['learning_rate']} Depth: {params['max_depth']}")
-        
-        if avg_mae < best_mae:
-            best_mae = avg_mae
-            best_params = params
-
-    print("\n" + "=" * 60)
-    print(f"BEST MAE: {best_mae:.4f}s")
-    print(best_params)
-    print("=" * 60)
+    cv_strategy = GroupKFold(n_splits=N_FOLDS)
+    
+    random_search = RandomizedSearchCV(
+        estimator=model,
+        param_distributions=PARAM_DIST,
+        n_iter=N_ITER,
+        scoring='neg_mean_absolute_error',
+        cv=cv_strategy,
+        verbose=1,
+        n_jobs=-1,
+    )
+    
+    print(f"Starting Random Search ({N_ITER} iterations)...")
+    random_search.fit(X, y, groups=groups)
+    
+    print("\n============================================================")
+    print(f"🏆 CHAMPION CONFIGURATION (CV MAE: {-random_search.best_score_:.4f}s)")
+    print("------------------------------------------------------------")
+    print(random_search.best_params_)
+    print("============================================================")
 
 if __name__ == "__main__":
     run_tuning()

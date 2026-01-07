@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error
-from train_model import load_and_prep, FEATURES
+from data_loader import load_and_prep, FEATURES
 
 # === CONFIG ===
 TEST_SEASON = 2025
@@ -23,11 +23,10 @@ def test_rf():
     # n_jobs=-1 uses all CPU cores (RF is parallel, so this is fast)
     print("Training Random Forest (this might take a minute)...")
     rf_model = RandomForestRegressor(
-        n_estimators=100,      # Number of trees
-        max_depth=10,          # Don't let trees grow too deep (prevents overfitting)
+        n_estimators=300,      # Number of trees
+        max_depth=None,          # Don't let trees grow too deep (prevents overfitting)
         min_samples_leaf=5,    # Require 5 laps in a leaf to make a prediction
         n_jobs=-1,             
-        random_state=42,
         verbose=1
     )
     rf_model.fit(train_df[features], train_df['NextLapTimeSec'])
