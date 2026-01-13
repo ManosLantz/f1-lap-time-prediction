@@ -1,9 +1,19 @@
 # config.py
+"""
+Configuration module for the F1 Lap Time Prediction project.
 
+This module defines global constants, race schedules, and physics parameters used
+across the data loading, feature engineering, and modeling pipelines.
+"""
+
+# ==============================================================================
+# 1. SCHEDULE & RACES
+# ==============================================================================
 SEASONS = [2022, 2023, 2024, 2025]
 
-# If None => use full season schedule (ALL races)
-# If list => only these races (fast debug mode)
+# RACES: List of race names to process.
+# If None, the system processes the full season schedule.
+# If a list is provided, it filters execution to only these races (useful for debugging).
 RACES = [
     "Bahrain Grand Prix",
     "Saudi Arabian Grand Prix",
@@ -28,20 +38,28 @@ RACES = [
     "Las Vegas Grand Prix",
     "Abu Dhabi Grand Prix",
 ]
-# Example debug subset:
-# RACES = ["Bahrain Grand Prix", "Monaco Grand Prix", "Italian Grand Prix"]
 
-# minimum lap time to consider (avoid outlaps/inlaps/SC chaos)
+# ==============================================================================
+# 2. DATA FILTERING THRESHOLDS
+# ==============================================================================
+
+# MIN_LAP_TIME_SEC: Absolute minimum lap time to be considered valid.
+# Used to filter out anomalies, out-laps, or severe safety car laps.
 MIN_LAP_TIME_SEC = 50
 
-# speed threshold for "corner" (km/h) for AEBI
+# CORNER_SPEED_THRESHOLD: Speed in km/h below which a sample is considered "cornering".
+# Used for computing AEBI (Aerodynamic Efficiency Brake Index).
 CORNER_SPEED_THRESHOLD = 180
 
-# cache directory for fastf1
+# FASTF1_CACHE_DIR: Local directory to store FastF1 cache files.
 FASTF1_CACHE_DIR = "data/raw"
 
-# Optional approximate corner counts per circuit
-# Missing circuits will default to 0 (or you can set -1)
+# ==============================================================================
+# 3. TRACK METADATA
+# ==============================================================================
+
+# TRACK_CORNERS: Approximate corner counts per circuit used for track complexity proxies.
+# If a circuit is missing, feature engineering handles defaults.
 TRACK_CORNERS = {
     "Bahrain Grand Prix": 15,
     "Saudi Arabian Grand Prix": 27,

@@ -1,0 +1,8 @@
+Forward LORO evaluation – Season 2025
+Races evaluated: 13
+
+Mean MAE gain (race-level): 0.079757 s
+Median MAE gain: 0.069701 s
+% races improved: 100.00%
+
+Saved per-race table: report_artifacts\per_race_2025_forward_loro.csv

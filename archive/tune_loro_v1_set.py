@@ -1,0 +1,93 @@
+
+import pandas as pd
+import numpy as np
+import xgboost as xgb
+import optuna
+from sklearn.metrics import mean_absolute_error
+import joblib
+import sys
+import os
+
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from data_loader import load_and_prep
+
+# --- CONFIGURATION: The 5-Feature Set requested by the USER ---
+FEATURES_TUNING = [
+    'PrevLapTimeSec', 'TyreAge', 'PushIndex', 
+    'FuelLapsRemaining', 'CarPaceIndex', 'FieldDelta'  
+]
+
+def objective(trial):
+    # 1. Suggest Params
+    params = {
+        'n_estimators': trial.suggest_int('n_estimators', 50, 600),
+        'max_depth': trial.suggest_int('max_depth', 3, 12),
+        'learning_rate': trial.suggest_float('learning_rate', 0.005, 0.1, log=True),
+        'subsample': trial.suggest_float('subsample', 0.5, 1.0),
+        'colsample_bytree': trial.suggest_float('colsample_bytree', 0.5, 1.0),
+        'reg_alpha': trial.suggest_float('reg_alpha', 0, 10),
+        'reg_lambda': trial.suggest_float('reg_lambda', 0, 10),
+        'n_jobs': -1,
+        'random_state': 42,
+        'verbosity': 0
+    }
+    
+    # 2. LORO Validation
+    # We use global variables X_global, y_global, groups_global set in main
+    races = np.unique(groups_global)
+    fold_maes = []
+    
+    # Due to speed, we might want to limit to a subset of races if it's too slow,
+    # but LORO across all 2025 races (excluding British) is about 20 folds.
+    for race_idx in races:
+        val_mask = (groups_global == race_idx)
+        train_mask = ~val_mask
+        
+        X_train, X_val = X_global[train_mask], X_global[val_mask]
+        y_train, y_val = y_global[train_mask], y_global[val_mask]
+        
+        # We also need the base lap times for the validation set to calculate total lap error
+        base_val = base_global[val_mask]
+        y_true_val = y_val + base_val
+        
+        model = xgb.XGBRegressor(**params)
+        model.fit(X_train, y_train)
+        
+        preds_diff = model.predict(X_val)
+        preds_lap = base_val + preds_diff
+        
+        mae = mean_absolute_error(y_true_val, preds_lap)
+        fold_maes.append(mae)
+        
+    return np.mean(fold_maes)
+
+if __name__ == "__main__":
+    print("🚀 LOADING DATA FOR LORO TUNING (5 FEATURES)...")
+    df, _ = load_and_prep()
+    
+    # Filter 2025 & Exclude British GP
+    mask = (df['Season'] == 2025) & (df['RaceName'] != 'British Grand Prix')
+    df = df[mask].copy()
+    
+    # Set Globals for speed in Optuna
+    global X_global, y_global, base_global, groups_global
+    X_global = df[FEATURES_TUNING].values
+    y_global = (df['NextLapTimeSec'] - df['PrevLapTimeSec']).values
+    base_global = df['PrevLapTimeSec'].values
+    groups_global = df['RaceName'].factorize()[0]
+    
+    print(f"📊 Dataset: {X_global.shape}, {len(np.unique(groups_global))} Races")
+    print(f"🔍 Features: {FEATURES_TUNING}")
+    
+    study = optuna.create_study(direction='minimize')
+    study.optimize(objective, n_trials=30)
+    
+    print("\n" + "="*60)
+    print(f"🏆 BEST LORO MAE: {study.best_value:.4f}s")
+    print("-" * 60)
+    print(f"Params: {study.best_params}")
+    print("="*60)
+    
+    # Save best params
+    joblib.dump(study.best_params, 'best_params_loro_v1_set.pkl')
+    print("💾 Saved best params to 'best_params_loro_v1_set.pkl'")
