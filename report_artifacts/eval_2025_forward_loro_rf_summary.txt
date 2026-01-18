@@ -1,0 +1,10 @@
+Forward LORO evaluation – Season 2025 (RandomForest)
+Races evaluated: 13
+
+Mean Baseline MAE : 0.524104 s
+Mean RF MAE       : 0.460925 s
+Mean Gain         : 0.063179 s
+Pct Gain          : 12.05%
+% races improved  : 92.31%
+
+Saved per-race table: report_artifacts\per_race_2025_forward_loro_rf.csv

@@ -1,0 +1,8 @@
+Forward LORO + Robust Kalman Filter (2-State)
+Params: Q=0.05, R=0.01
+Season: 2025
+-----------------------------------------
+Mean MAE Gain (vs Base): 0.080323 s
+Mean Safety Coverage (Target 95%): 37.46%
+Saved per-race table: report_artifacts\per_race_2025_robustness.csv
+Saved all-lap details: report_artifacts\all_laps_robustness_2025.csv

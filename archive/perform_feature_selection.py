@@ -6,6 +6,7 @@ from sklearn.inspection import permutation_importance
 from sklearn.model_selection import train_test_split
 import sys
 import os
+import joblib
 
 # Import data_loader (from parent directory)
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -28,15 +29,14 @@ def run_feature_selection():
     # Train/Val Split
     X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, random_state=42)
     
+    DATA_PATH = "data/f1_lap_dataset.csv"
+    META_PATH = "model_v3_meta.pkl"  
     # Train XGBoost (Fast but decent)
     print("🚀 Training XGBoost Probe Model...")
-    model = xgb.XGBRegressor(
-        n_estimators=300,
-        max_depth=6,
-        learning_rate=0.05,
-        n_jobs=-1,
-        random_state=42
-    )
+    meta = joblib.load(META_PATH)
+    BEST_PARAMS = meta["best_params"]
+
+    model = xgb.XGBRegressor(**BEST_PARAMS)
     model.fit(X_train, y_train)
     
     baseline_score = model.score(X_val, y_val)

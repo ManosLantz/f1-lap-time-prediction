@@ -1,0 +1,11 @@
+Significance test: Model vs Baseline (paired by Race, LORO-style)
+
+Races evaluated: 65
+Mean MAE gain (baseline - model): 0.098922 s
+Median MAE gain: 0.084929 s
+% races where model beats baseline (gain > 0): 100.00%
+Bootstrap 95% CI for mean gain: [0.080443, 0.123091] s
+Effect size (paired Cohen's d): 1.129
+
+Paired t-test (H0: mean gain = 0): p = 3.734e-13
+Wilcoxon signed-rank (H0: median gain <= 0, alt: gain > 0): p = 1.202e-12
